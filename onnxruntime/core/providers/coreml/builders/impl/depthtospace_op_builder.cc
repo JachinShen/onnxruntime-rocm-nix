@@ -67,9 +67,7 @@ Status DepthToSpaceOpBuilder::AddToModelBuilderImpl(ModelBuilder& model_builder,
       // we checked shape was static in IsOpSupportedImpl so this should never fail
       std::vector<int64_t> input_shape;
       ORT_RETURN_IF_NOT(GetStaticShape(*input_defs[0], input_shape, logger), "Failed to get input shape");
-      auto input_dtype = input_defs[0]->TypeAsProto()->tensor_type().elem_type();
-
-      const int32_t elem_type = static_cast<int32_t>(input_dtype);
+      const int32_t elem_type = static_cast<int32_t>(ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
 
       // reshape to [b * c // (blocksize ** 2), blocksize, blocksize, h, w]
       auto reshape1 = model_builder.CreateOperation(node, "reshape", "pre");

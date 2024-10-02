@@ -10,13 +10,6 @@
 namespace onnxruntime {
 namespace test {
 
-template <typename T>
-class ResizeOpTest : public ::testing::Test {
-};
-
-using ResizeOpTestTypes = ::testing::Types<float, MLFloat16>;
-TYPED_TEST_SUITE(ResizeOpTest, ResizeOpTestTypes);
-
 TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_tf_crop_and_resize) {
   // TODO: Unskip when fixed #41968513
   if (DefaultDmlExecutionProvider().get() != nullptr) {
@@ -233,26 +226,26 @@ TEST(ResizeOpTest, NhwcResizeOpLinearDownSampleTest_tf_crop_and_resize_without_e
   test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kDmlExecutionProvider});
 }
 
-TYPED_TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_4DBilinear) {
+TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_4DBilinear) {
   auto run_test = [](bool scales_in_initializer) {
     OpTester test("Resize", 13);
-    std::vector<TypeParam> roi{};
+    std::vector<float> roi{};
     std::vector<float> scales{1.0f, 1.0f, 0.6f, 0.6f};
 
     test.AddAttribute("mode", "linear");
 
     constexpr int64_t N = 1, C = 1, H = 2, W = 4;
-    std::vector<TypeParam> X = {
-        TypeParam(1.0f), TypeParam(2.0f), TypeParam(3.0f), TypeParam(4.0f),
-        TypeParam(5.0f), TypeParam(6.0f), TypeParam(7.0f), TypeParam(8.0f)};
+    std::vector<float> X = {
+        1.0f, 2.0f, 3.0f, 4.0f,
+        5.0f, 6.0f, 7.0f, 8.0f};
 
-    test.AddInput<TypeParam>("X", {N, C, H, W}, X);
-    test.AddInput<TypeParam>("roi", {0}, roi);
+    test.AddInput<float>("X", {N, C, H, W}, X);
+    test.AddInput<float>("roi", {0}, roi);
     test.AddInput<float>("scales", {4}, scales, scales_in_initializer);
 
-    std::vector<TypeParam> Y = {TypeParam(2.66666651f), TypeParam(4.3333331f)};
+    std::vector<float> Y = {2.66666651f, 4.3333331f};
 
-    test.AddOutput<TypeParam>("Y", {N, C, static_cast<int64_t>(H * scales[2]), static_cast<int64_t>(W * scales[3])}, Y);
+    test.AddOutput<float>("Y", {N, C, static_cast<int64_t>(H * scales[2]), static_cast<int64_t>(W * scales[3])}, Y);
     // QNN: result diff
     // TRT: Segmentation fault in A100
     std::unordered_set<std::string> excluded_providers({kQnnExecutionProvider});
