@@ -364,6 +364,7 @@ const initVarStub = (seqLensInput: IndicesHelper | undefined, totalSequenceLengt
       var total_sequence_length = u32(${totalSequenceLengthInput.getByOffset('0')});
       let is_subsequent_prompt: bool = sequence_length > 1 && sequence_length != total_sequence_length;
       let is_first_prompt: bool = is_subsequent_prompt == false && sequence_length == total_sequence_length;
+      sequence_length = u32(${seqLensInput?.getByOffset('batchIdx')});
       total_sequence_length = u32(${seqLensInput?.getByOffset('batchIdx')} + 1);
       var past_sequence_length: u32 = 0;
       if (is_first_prompt) {
@@ -496,7 +497,7 @@ const createAttentionProbsProgramInfo = (
     let batchIdx = workgroup_id.z / uniforms.num_heads;
     let m = workgroup_id.y * TILE_SIZE;
     let n = workgroup_id.x * TILE_SIZE;
-    let sequence_length = uniforms.M;
+    var sequence_length = uniforms.M;
     let head_size = uniforms.K *${components} / uniforms.num_heads;
     ${initVarStub(seqLensInputVariable, totalSequenceLengthInputVariable)}
     let qOffset = uniforms.M * uniforms.K * headIdx + m * uniforms.K;
@@ -513,21 +514,29 @@ const createAttentionProbsProgramInfo = (
     ${presentKey ? 'let presentKeyOffset = kvHeadIdx * present_sequence_length * uniforms.K;' : ''}
     var value = ${f32Type}(0);
     for (var w: u32 = 0u; w < uniforms.K; w += TILE_SIZE) {
-      if (global_id.y < uniforms.M && w + local_id.x < uniforms.K) {
+      if (global_id.y < sequence_length && w + local_id.x < uniforms.K && m + local_id.y < sequence_length) {
         tileQ[TILE_SIZE * local_id.y + local_id.x] = q[qOffset + local_id.y * uniforms.K + w + local_id.x];
+      } else {
+        tileQ[TILE_SIZE * local_id.y + local_id.x] = ${qInput.type.storage}(0);
       }
       if (n + local_id.y < total_sequence_length && w + local_id.x < uniforms.K) {
         var idx = TILE_SIZE * local_id.y + local_id.x;
       ${(() => {
         if (feedPastKey && presentKey) {
           return `
-              if (n + local_id.y < past_sequence_length * uniforms.n_reps) {
+              if (n + local_id.y < past_sequence_length) {
                 tileK[idx] = past_key[pastKeyOffset + (n + local_id.y) * uniforms.K + w + local_id.x];
-              } else {
+              } else if (n + local_id.y - past_sequence_length < uniforms.kv_sequence_length) {
                 tileK[idx] = key[kOffset + (n + local_id.y - past_sequence_length) * uniforms.K + w + local_id.x];
+              } else {
+                tileK[idx] = ${qInput.type.storage}(0);
               }`;
         } else {
-          return `tileK[idx] = key[kOffset + local_id.y * uniforms.K + w + local_id.x];`;
+          return `if (local_id.y < uniforms.kv_sequence_length) {
+          tileK[idx] = key[kOffset + local_id.y * uniforms.K + w + local_id.x];
+        } else {
+          tileK[idx] = ${qInput.type.storage}(0);
+        }`;
         }
       })()}
       ${
@@ -613,7 +622,7 @@ const createVxAttentionScoreProgramInfo = (
     { type: DataType.uint32, data: totalSequenceLength },
     { type: DataType.uint32, data: params.vHeadSize },
     { type: DataType.uint32, data: params.numHeads },
-    { type: DataType.uint32, data: repeatedVHiddenSize },
+    { type: DataType.uint32, data: params.headSize },
     { type: DataType.uint32, data: pastSequenceLength },
     { type: DataType.uint32, data: params.kvSequenceLength },
     { type: DataType.uint32, data: nReps },
@@ -663,7 +672,7 @@ const createVxAttentionScoreProgramInfo = (
       { name: 'K', type: 'u32' },
       { name: 'N', type: 'u32' },
       { name: 'num_heads', type: 'u32' },
-      { name: 'v_hidden_size', type: 'u32' },
+      { name: 'head_size', type: 'u32' },
       { name: 'past_sequence_length', type: 'u32' },
       { name: 'kv_sequence_length', type: 'u32' },
       { name: 'n_reps', type: 'u32' },
@@ -681,7 +690,7 @@ const createVxAttentionScoreProgramInfo = (
    let batchIdx = workgroup_id.z / uniforms.num_heads;
    let m = global_id.y;
    let n = global_id.x;
-   let sequence_length = uniforms.M;
+   var sequence_length = uniforms.M;
    let num_kv_heads = uniforms.num_heads / uniforms.n_reps;
    let head_size = uniforms.N / num_kv_heads;
    ${initVarStub(seqLensInputVariable, totalSequenceLengthInputVariable)}
@@ -700,24 +709,32 @@ const createVxAttentionScoreProgramInfo = (
    })()}
     ${presentValue ? 'let presentValueOffset = kvHeadIdx * uniforms.N * present_sequence_length + n;' : ''}
    var value = ${probsHelper.type.storage}(0);
-   for (var w: u32 = 0u; w < total_sequence_length; w += TILE_SIZE) {
-      if (m < uniforms.M && w + local_id.x < total_sequence_length) {
+   for (var w: u32 = 0u; w < uniforms.K; w += TILE_SIZE) {
+      if (m < sequence_length && w + local_id.x < total_sequence_length) {
         tileQ[TILE_SIZE * local_id.y + local_id.x] = probs[offsetA + w + local_id.x];
+      } else {
+        tileQ[TILE_SIZE * local_id.y + local_id.x] = ${probsHelper.type.storage}(0);
       }
-      if (n < uniforms.N && w + local_id.y < total_sequence_length) {
+      if (n < uniforms.N && w + local_id.y < uniforms.K) {
         var idx = TILE_SIZE * local_id.y + local_id.x;
         ${(() => {
           if (feedPastValue && presentValue) {
             return `
         if (w + local_id.y < past_sequence_length) {
           tileV[idx] = past_value[pastValueOffset + (w + local_id.y) * uniforms.N];
-        } else {
+        } else if (w + local_id.y - past_sequence_length < uniforms.kv_sequence_length) {
           tileV[idx] = v[vOffset + (w + local_id.y - past_sequence_length) * uniforms.N];
+        } else {
+          tileV[idx] = ${probsHelper.type.storage}(0);
         }
       `;
           } else {
             return `
+            if (w + local_id.y < uniforms.kv_sequence_length) {
         tileV[idx] = v[vOffset + (w + local_id.y) * uniforms.N];
+          } else {
+        tileV[idx] = ${probsHelper.type.storage}(0);
+          }
       `;
           }
         })()}
@@ -739,9 +756,9 @@ const createVxAttentionScoreProgramInfo = (
 
    // we need to transpose output from BNSH_v to BSND_v
    let currentBatchHeadNumber = workgroup_id.z % uniforms.num_heads;
-   if (m < sequence_length && n < uniforms.N) {
-     let outputIdx = batchIdx * sequence_length * uniforms.v_hidden_size + m * uniforms.v_hidden_size
-       + currentBatchHeadNumber * uniforms.N + n;
+   if (m < uniforms.M && n < uniforms.N) {
+     let outputIdx = headIdx * sequence_length * uniforms.head_size + m * uniforms.head_size
+        + n;
      output[outputIdx] = value;
    }
   }`;
