@@ -1,0 +1,23 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1727994327,
+        "narHash": "sha256-WMkuhfbbJL7ZqGtR93wCUxkiLwgujlqTH737FE/DOek=",
+        "type": "tarball",
+        "url": "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/nixos-24.05/nixexprs.tar.xz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/nixos-24.05/nixexprs.tar.xz"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
